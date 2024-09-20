@@ -15,6 +15,7 @@ from werkzeug.exceptions import HTTPException, NotFound, BadRequest
 app = Flask(__name__)
 
 app.config.from_pyfile('settings.py')
+print(MONGO_DB_URL)
 
 client = MongoClient(MONGO_DB_URL, int(MONGO_DB_PORT))
 
@@ -40,6 +41,7 @@ def handle_exception(e):
     response.content_type = "application/json"
     return response
 
+
 @app.errorhandler(ServerSelectionTimeoutError)
 def handle_db_error(e):
     return Response(json.dumps({
@@ -49,39 +51,38 @@ def handle_db_error(e):
     }), status=500, mimetype="application/json")
 
 
-
-#Authentication Routes
+# Authentication Routes
 @app.post('/login')
 def login():
     data = request.get_json()
     username = data['username']
     password = data['password']
-    print('Received data:', username , password)
-    if not (username=='admin' and password=="password"):
-        user = users_db.find_one({"first_name":username})
+    print('Received data:', username, password)
+    if not (username == 'admin' and password == "password"):
+        user = users_db.find_one({"first_name": username})
 
         if user and Crypt().check_hash(user['password'], password):
-            session['session_id']=str(uuid.uuid4())
-            session['user_id']=json.loads(json_util.dumps(user['_id']))
-            session['logged_in']=True
+            session['session_id'] = str(uuid.uuid4())
+            session['user_id'] = json.loads(json_util.dumps(user['_id']))
+            session['logged_in'] = True
             access_token = create_access_token(identity=session['session_id'])
-            return jsonify({'message': 'Login Success', 'access_token': access_token, 'session_id':session['session_id']})
+            return jsonify({'message': 'Login Success', 'access_token': access_token, 'session_id': session['session_id']})
         else:
             return jsonify({'message': 'Login Failed'}), 401
     else:
         if session.get('logged_in'):
             raise BadRequest('User already authenticated')
         session['session_id'] = str(uuid.uuid4())
-        session['logged_in']=True
-        access_token=create_access_token(identity=session['session_id'])
-        return jsonify({'message':'Login Success','access_token':access_token,'session_id':session['session_id']})
+        session['logged_in'] = True
+        access_token = create_access_token(identity=session['session_id'])
+        return jsonify({'message': 'Login Success', 'access_token': access_token, 'session_id': session['session_id']})
 
 
 @app.post("/logout")
 @jwt_required()
 def logout():
     session.clear()
-    return jsonify({'message':'Logout Success'})
+    return jsonify({'message': 'Logout Success'})
 
 
 @app.get("/user")
@@ -107,34 +108,36 @@ def createUser():
     try:
         result = schema.load(data)
         print(result.to_json())
-        id=users_db.insert_one({**result.to_json(),"created_at":datetime.now(),"updated_at":datetime.now()})
-        result._id=id.inserted_id
-        return Response(json_util.dumps({"id":result._id}),status=201,mimetype='application/json')
+        id = users_db.insert_one(
+            {**result.to_json(), "created_at": datetime.now(), "updated_at": datetime.now()})
+        result._id = id.inserted_id
+        return Response(json_util.dumps({"id": result._id}), status=201, mimetype='application/json')
     except ValidationError as err:
         # Return a nice message if validation fails
         return jsonify(err.messages), 400
 
 
-
 @app.put('/user/<id>')
 @jwt_required()
 def updateUser(id):
+    if not session:
+        return jsonify({"message": 'User not authenticated'}), 401
     data = request.json
     schema = UserSchema()
     try:
-        user=schema.load(data,partial=True)
+        user = schema.load(data, partial=True)
         print(user.to_json())
-        user_json=user.to_json()
+        user_json = user.to_json()
         for key in list(user_json.keys()):
             if user_json[key] is None:
                 del user_json[key]
-        id=users_db.find_one_and_update({"_id": ObjectId(id)},{"$set": {**user_json,"updated_at":datetime.now(),'session_token':str(session['session_id'])}},upsert=True)
+        id = users_db.find_one_and_update({"_id": ObjectId(id)}, {"$set": {
+                                          **user_json, "updated_at": datetime.now(), 'session_token': str(session['session_id'])}}, upsert=True)
         if not id:
             raise NotFound('User not found')
-        return jsonify({"message": "success"}),200
+        return jsonify({"message": "success"}), 200
     except ValidationError as err:
         return jsonify(err.messages), 400
-
 
 
 @app.delete('/user/<id>/')
@@ -143,4 +146,4 @@ def delete(id):
     record = users_db.find_one_and_delete({"_id": ObjectId(id)})
     if not record:
         raise NotFound("No user Found")
-    return jsonify({"message": "success"}),200
+    return jsonify({"message": "success"}), 200
